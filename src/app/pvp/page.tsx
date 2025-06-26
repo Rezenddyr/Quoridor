@@ -11,6 +11,31 @@ const WALL_THICKNESS = 4;
 type Position = { row: number; col: number };
 type Wall = { type: 'horizontal' | 'vertical'; row: number; col: number };
 
+// Função auxiliar para verificar paredes (fora do componente)
+const isWallBetweenWithSet = (start: Position, end: Position, wallsSet: Wall[]): boolean => {
+  if (start.row !== end.row) {
+    const top = Math.min(start.row, end.row);
+    const col = start.col;
+    return wallsSet.some(wall =>
+      wall.type === 'horizontal' &&
+      wall.row === top &&
+      (wall.col === col || wall.col === col - 1)
+    );
+  }
+
+  if (start.col !== end.col) {
+    const left = Math.min(start.col, end.col);
+    const row = start.row;
+    return wallsSet.some(wall =>
+      wall.type === 'vertical' &&
+      wall.col === left &&
+      (wall.row === row || wall.row === row - 1)
+    );
+  }
+
+  return false;
+};
+
 export default function QuoridorGame() {
   const router = useRouter();
   const [players, setPlayers] = useState({
@@ -50,27 +75,7 @@ export default function QuoridorGame() {
   };
 
   const isWallBetween = (start: Position, end: Position): boolean => {
-    if (start.row !== end.row) {
-      const top = Math.min(start.row, end.row);
-      const col = start.col;
-      return walls.some(wall =>
-        wall.type === 'horizontal' &&
-        wall.row === top &&
-        (wall.col === col || wall.col === col - 1)
-      );
-    }
-
-    if (start.col !== end.col) {
-      const left = Math.min(start.col, end.col);
-      const row = start.row;
-      return walls.some(wall =>
-        wall.type === 'vertical' &&
-        wall.col === left &&
-        (wall.row === row || wall.row === row - 1)
-      );
-    }
-
-    return false;
+    return isWallBetweenWithSet(start, end, walls);
   };
 
   const getValidMoves = (currentPos: Position): Position[] => {
@@ -99,6 +104,25 @@ export default function QuoridorGame() {
 
           if (isValidPosition(jumpPos) && !isWallBetween(newPos, jumpPos)) {
             moves.push(jumpPos);
+          } else {
+            // Movimentos diagonais quando não pode pular
+            const diagonalDirections = [
+              { row: dir.row, col: -1 },
+              { row: dir.row, col: 1 },
+            ];
+
+            diagonalDirections.forEach(diagDir => {
+              const diagPos = {
+                row: currentPos.row + diagDir.row,
+                col: currentPos.col + diagDir.col
+              };
+
+              if (isValidPosition(diagPos) &&
+                !isWallBetween(currentPos, diagPos) &&
+                !moves.some(p => p.row === diagPos.row && p.col === diagPos.col)) {
+                moves.push(diagPos);
+              }
+            });
           }
         } else {
           moves.push(newPos);
@@ -107,6 +131,57 @@ export default function QuoridorGame() {
     });
 
     return moves;
+  };
+
+  // Função BFS para verificar caminho
+  const canReachGoal = (player: 'P1' | 'P2', wallsSet: Wall[]): boolean => {
+    const goalRow = player === 'P1' ? BOARD_SIZE - 1 : 0;
+    const start = players[player];
+    const visited = Array(BOARD_SIZE).fill(false).map(() => Array(BOARD_SIZE).fill(false));
+    const queue: Position[] = [start];
+    visited[start.row][start.col] = true;
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+
+      // Verificar se atingiu o objetivo
+      if (player === 'P1' && current.row === goalRow) return true;
+      if (player === 'P2' && current.row === goalRow) return true;
+
+      const directions = [
+        { row: -1, col: 0 }, // up
+        { row: 1, col: 0 },  // down
+        { row: 0, col: -1 }, // left
+        { row: 0, col: 1 }   // right
+      ];
+
+      for (const dir of directions) {
+        const next: Position = {
+          row: current.row + dir.row,
+          col: current.col + dir.col
+        };
+
+        // Verificar se está dentro do tabuleiro
+        if (next.row < 0 || next.row >= BOARD_SIZE || next.col < 0 || next.col >= BOARD_SIZE) {
+          continue;
+        }
+
+        // Verificar se já foi visitado
+        if (visited[next.row][next.col]) {
+          continue;
+        }
+
+        // Verificar se há parede bloqueando
+        if (isWallBetweenWithSet(current, next, wallsSet)) {
+          continue;
+        }
+
+        visited[next.row][next.col] = true;
+        queue.push(next);
+      }
+    }
+
+    return false;
   };
 
   const handleMove = (target: Position) => {
@@ -139,6 +214,7 @@ export default function QuoridorGame() {
     if ((wall.type === 'horizontal' && wall.col >= BOARD_SIZE - 1) ||
       (wall.type === 'vertical' && wall.row >= BOARD_SIZE - 1)) return;
 
+    // Verificar sobreposição de paredes
     const isOverlap = walls.some(w => {
       if (w.type === wall.type) {
         if (w.type === 'horizontal') {
@@ -177,14 +253,26 @@ export default function QuoridorGame() {
       }
     });
 
-    if (!isOverlap) {
-      setWalls(prev => [...prev, wall]);
-      setRemainingWalls(prev => ({
-        ...prev,
-        [currentPlayer]: prev[currentPlayer] - 1
-      }));
-      endTurn();
+    if (isOverlap) return;
+
+    // Criar conjunto temporário com a nova parede
+    const newWalls = [...walls, wall];
+
+    // Verificar se ambos os jogadores têm caminho
+    const p1CanReach = canReachGoal('P1', newWalls);
+    const p2CanReach = canReachGoal('P2', newWalls);
+
+    if (!p1CanReach || !p2CanReach) {
+      alert('Não é possível bloquear o caminho de nenhum jogador!');
+      return;
     }
+
+    setWalls(newWalls);
+    setRemainingWalls(prev => ({
+      ...prev,
+      [currentPlayer]: prev[currentPlayer] - 1
+    }));
+    endTurn();
   };
 
   const endTurn = () => {
@@ -192,202 +280,202 @@ export default function QuoridorGame() {
     setActionPhase('move');
   };
 
-  const saveGame = () => {
-    const gameState = {
-      players,
-      walls,
-      currentPlayer,
-      remainingWalls,
-      actionPhase
-    };
-
-    const save = {
-      id: Date.now().toString(),
-      date: new Date().toLocaleString(),
-      state: gameState
-    };
-
-    const saves = JSON.parse(localStorage.getItem('quoridor-saves') || '[]');
-    saves.unshift(save);
-    localStorage.setItem('quoridor-saves', JSON.stringify(saves));
-    alert('Jogo salvo com sucesso!');
+const saveGame = () => {
+  const gameState = {
+    players,
+    walls,
+    currentPlayer,
+    remainingWalls,
+    actionPhase
   };
 
-  const resetGame = () => {
-    setPlayers({
-      P1: { row: 0, col: 4 },
-      P2: { row: 8, col: 4 },
-    });
-    setWalls([]);
-    setCurrentPlayer('P1');
-    setRemainingWalls({ P1: 10, P2: 10 });
-    setActionPhase('move');
-    setGameOver(false);
-    setWinner(null);
+  const save = {
+    id: Date.now().toString(),
+    date: new Date().toLocaleString(),
+    state: gameState
   };
 
-  const goToMainMenu = () => {
-    router.push('/');
-  };
+  const saves = JSON.parse(localStorage.getItem('quoridor-saves') || '[]');
+  saves.unshift(save);
+  localStorage.setItem('quoridor-saves', JSON.stringify(saves));
+  alert('Jogo salvo com sucesso!');
+};
 
-  const renderCell = (row: number, col: number) => {
-    const isP1 = players.P1.row === row && players.P1.col === col;
-    const isP2 = players.P2.row === row && players.P2.col === col;
-    const isValidMove = validMoves.some(p => p.row === row && p.col === col);
+const resetGame = () => {
+  setPlayers({
+    P1: { row: 0, col: 4 },
+    P2: { row: 8, col: 4 },
+  });
+  setWalls([]);
+  setCurrentPlayer('P1');
+  setRemainingWalls({ P1: 10, P2: 10 });
+  setActionPhase('move');
+  setGameOver(false);
+  setWinner(null);
+};
 
-    return (
-      <div
-        key={`cell-${row}-${col}`}
-        onClick={() => !gameOver && actionPhase === 'move' && handleMove({ row, col })}
-        className={clsx(
-          'relative flex items-center justify-center cursor-pointer',
-          'border border-gray-600 transition-colors',
-          isP1 && 'bg-[#0085EA]',
-          isP2 && 'bg-[#FF6B6B]',
-          !isP1 && !isP2 && 'bg-[#00213A] hover:bg-[#003752]',
-          { 'cursor-not-allowed': gameOver || actionPhase !== 'move' }
-        )}
-        style={{
-          width: CELL_SIZE,
-          height: CELL_SIZE,
-        }}
-      >
-        {!isP1 && !isP2 && isValidMove && actionPhase === 'move' && !gameOver && (
-          <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse" />
-        )}
+const goToMainMenu = () => {
+  router.push('/');
+};
 
-        {isP1 && 'P1'}
-        {isP2 && 'P2'}
-      </div>
-    );
-  };
-
-  const renderWalls = () => {
-    return walls.map((wall, index) => {
-      const style: React.CSSProperties = {
-        position: 'absolute',
-        backgroundColor: '#FFFF00',
-        zIndex: 10,
-        pointerEvents: 'none'
-      };
-
-      if (wall.type === 'horizontal') {
-        style.top = `${(wall.row + 1) * CELL_SIZE - WALL_THICKNESS}px`;
-        style.left = `${wall.col * CELL_SIZE}px`;
-        style.width = `${CELL_SIZE * 2 - 1}px`;
-        style.height = `${WALL_THICKNESS}px`;
-      } else {
-        style.top = `${wall.row * CELL_SIZE}px`;
-        style.left = `${(wall.col + 1) * CELL_SIZE - WALL_THICKNESS}px`;
-        style.width = `${WALL_THICKNESS}px`;
-        style.height = `${CELL_SIZE * 2 - 1}px`;
-      }
-
-      return <div key={`wall-${index}`} style={style} />;
-    });
-  };
+const renderCell = (row: number, col: number) => {
+  const isP1 = players.P1.row === row && players.P1.col === col;
+  const isP2 = players.P2.row === row && players.P2.col === col;
+  const isValidMove = validMoves.some(p => p.row === row && p.col === col);
 
   return (
-    <div className="min-h-screen bg-[#00111F] text-white flex flex-col items-center py-10 font-sans">
-      <h1 className="text-4xl font-bold mb-4">Quoridor</h1>
-
-      <div className="relative" style={{ width: CELL_SIZE * BOARD_SIZE, height: CELL_SIZE * BOARD_SIZE }}>
-        <div className="grid grid-cols-9 absolute top-0 left-0">
-          {Array(BOARD_SIZE).fill(0).map((_, row) =>
-            Array(BOARD_SIZE).fill(0).map((_, col) => renderCell(row, col))
-          )}
-        </div>
-
-        {renderWalls()}
-
-        {actionPhase === 'wall' && !gameOver && (
-          <>
-            {Array(BOARD_SIZE - 1).fill(0).map((_, row) =>
-              Array(BOARD_SIZE - 1).fill(0).map((_, col) => (
-                <div key={`wall-${row}-${col}`}>
-                  <div
-                    className="absolute hover:bg-gray-400 opacity-25 cursor-pointer"
-                    style={{
-                      top: (row + 1) * CELL_SIZE - WALL_THICKNESS,
-                      left: col * CELL_SIZE,
-                      width: CELL_SIZE * 2,
-                      height: WALL_THICKNESS,
-                    }}
-                    onClick={() => handleWall({ type: 'horizontal', row, col })}
-                  />
-                  <div
-                    className="absolute hover:bg-gray-400 opacity-25 cursor-pointer"
-                    style={{
-                      top: row * CELL_SIZE,
-                      left: (col + 1) * CELL_SIZE - WALL_THICKNESS,
-                      width: WALL_THICKNESS,
-                      height: CELL_SIZE * 2,
-                    }}
-                    onClick={() => handleWall({ type: 'vertical', row, col })}
-                  />
-                </div>
-              ))
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="mt-4 text-center space-y-2">
-        <button
-          onClick={saveGame}
-          className="bg-[#00C853] hover:bg-[#009624] px-4 py-2 rounded-lg transition-colors"
-        >
-          Salvar Jogo
-        </button>
-        <button
-          onClick={goToMainMenu}
-          className="bg-[#FF6B6B] hover:bg-[#ff5252] px-4 py-2 rounded-lg transition-colors"
-        >
-          Voltar ao Menu
-        </button>
-
-        <p className="text-lg">
-          Vez do: <span className="font-bold text-[#0085EA]">{currentPlayer}</span>
-        </p>
-        <p className="text-sm">
-          Muros restantes:
-          <span className="text-[#0085EA]"> P1 ({remainingWalls.P1})</span> |
-          <span className="text-[#FF6B6B]"> P2 ({remainingWalls.P2})</span>
-        </p>
-
-        {actionPhase === 'wall' && !gameOver && (
-          <button
-            onClick={endTurn}
-            className="bg-[#0085EA] hover:bg-[#006fbd] px-4 py-2 rounded-lg transition-colors"
-          >
-            Pular fase de muro
-          </button>
-        )}
-      </div>
-
-      {gameOver && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center">
-          <div className="bg-[#00213A] p-8 rounded-lg text-center space-y-4">
-            <h2 className="text-3xl font-bold text-[#00FF87]">
-              Vitória do Jogador {winner}!
-            </h2>
-            <div className="flex justify-center space-x-4">
-              <button
-                onClick={resetGame}
-                className="bg-[#0085EA] hover:bg-[#006fbd] px-6 py-3 rounded-lg text-lg font-semibold transition-colors"
-              >
-                Jogar Novamente
-              </button>
-              <button
-                onClick={goToMainMenu}
-                className="bg-[#FF6B6B] hover:bg-[#ff5252] px-6 py-3 rounded-lg text-lg font-semibold transition-colors"
-              >
-                Menu Principal
-              </button>
-            </div>
-          </div>
-        </div>
+    <div
+      key={`cell-${row}-${col}`}
+      onClick={() => !gameOver && actionPhase === 'move' && handleMove({ row, col })}
+      className={clsx(
+        'relative flex items-center justify-center cursor-pointer',
+        'border border-gray-600 transition-colors',
+        isP1 && 'bg-[#0085EA]',
+        isP2 && 'bg-[#FF6B6B]',
+        !isP1 && !isP2 && 'bg-[#00213A] hover:bg-[#003752]',
+        { 'cursor-not-allowed': gameOver || actionPhase !== 'move' }
       )}
+      style={{
+        width: CELL_SIZE,
+        height: CELL_SIZE,
+      }}
+    >
+      {!isP1 && !isP2 && isValidMove && actionPhase === 'move' && !gameOver && (
+        <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse" />
+      )}
+
+      {isP1 && 'P1'}
+      {isP2 && 'P2'}
     </div>
   );
+};
+
+const renderWalls = () => {
+  return walls.map((wall, index) => {
+    const style: React.CSSProperties = {
+      position: 'absolute',
+      backgroundColor: '#FFFF00',
+      zIndex: 10,
+      pointerEvents: 'none'
+    };
+
+    if (wall.type === 'horizontal') {
+      style.top = `${(wall.row + 1) * CELL_SIZE - WALL_THICKNESS}px`;
+      style.left = `${wall.col * CELL_SIZE}px`;
+      style.width = `${CELL_SIZE * 2 - 1}px`;
+      style.height = `${WALL_THICKNESS}px`;
+    } else {
+      style.top = `${wall.row * CELL_SIZE}px`;
+      style.left = `${(wall.col + 1) * CELL_SIZE - WALL_THICKNESS}px`;
+      style.width = `${WALL_THICKNESS}px`;
+      style.height = `${CELL_SIZE * 2 - 1}px`;
+    }
+
+    return <div key={`wall-${index}`} style={style} />;
+  });
+};
+
+return (
+  <div className="min-h-screen bg-[#00111F] text-white flex flex-col items-center py-10 font-sans">
+    <h1 className="text-4xl font-bold mb-4">Quoridor</h1>
+
+    <div className="relative" style={{ width: CELL_SIZE * BOARD_SIZE, height: CELL_SIZE * BOARD_SIZE }}>
+      <div className="grid grid-cols-9 absolute top-0 left-0">
+        {Array(BOARD_SIZE).fill(0).map((_, row) =>
+          Array(BOARD_SIZE).fill(0).map((_, col) => renderCell(row, col))
+        )}
+      </div>
+
+      {renderWalls()}
+
+      {actionPhase === 'wall' && !gameOver && (
+        <>
+          {Array(BOARD_SIZE - 1).fill(0).map((_, row) =>
+            Array(BOARD_SIZE - 1).fill(0).map((_, col) => (
+              <div key={`wall-${row}-${col}`}>
+                <div
+                  className="absolute hover:bg-gray-400 opacity-25 cursor-pointer"
+                  style={{
+                    top: (row + 1) * CELL_SIZE - WALL_THICKNESS,
+                    left: col * CELL_SIZE,
+                    width: CELL_SIZE * 2,
+                    height: WALL_THICKNESS,
+                  }}
+                  onClick={() => handleWall({ type: 'horizontal', row, col })}
+                />
+                <div
+                  className="absolute hover:bg-gray-400 opacity-25 cursor-pointer"
+                  style={{
+                    top: row * CELL_SIZE,
+                    left: (col + 1) * CELL_SIZE - WALL_THICKNESS,
+                    width: WALL_THICKNESS,
+                    height: CELL_SIZE * 2,
+                  }}
+                  onClick={() => handleWall({ type: 'vertical', row, col })}
+                />
+              </div>
+            ))
+          )}
+        </>
+      )}
+    </div>
+
+    <div className="mt-4 text-center space-y-2">
+      <button
+        onClick={saveGame}
+        className="bg-[#00C853] hover:bg-[#009624] px-4 py-2 rounded-lg transition-colors"
+      >
+        Salvar Jogo
+      </button>
+      <button
+        onClick={goToMainMenu}
+        className="bg-[#FF6B6B] hover:bg-[#ff5252] px-4 py-2 rounded-lg transition-colors"
+      >
+        Voltar ao Menu
+      </button>
+
+      <p className="text-lg">
+        Vez do: <span className="font-bold text-[#0085EA]">{currentPlayer}</span>
+      </p>
+      <p className="text-sm">
+        Muros restantes:
+        <span className="text-[#0085EA]"> P1 ({remainingWalls.P1})</span> |
+        <span className="text-[#FF6B6B]"> P2 ({remainingWalls.P2})</span>
+      </p>
+
+      {actionPhase === 'wall' && !gameOver && (
+        <button
+          onClick={endTurn}
+          className="bg-[#0085EA] hover:bg-[#006fbd] px-4 py-2 rounded-lg transition-colors"
+        >
+          Pular fase de muro
+        </button>
+      )}
+    </div>
+
+    {gameOver && (
+      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center">
+        <div className="bg-[#00213A] p-8 rounded-lg text-center space-y-4">
+          <h2 className="text-3xl font-bold text-[#00FF87]">
+            Vitória do Jogador {winner}!
+          </h2>
+          <div className="flex justify-center space-x-4">
+            <button
+              onClick={resetGame}
+              className="bg-[#0085EA] hover:bg-[#006fbd] px-6 py-3 rounded-lg text-lg font-semibold transition-colors"
+            >
+              Jogar Novamente
+            </button>
+            <button
+              onClick={goToMainMenu}
+              className="bg-[#FF6B6B] hover:bg-[#ff5252] px-6 py-3 rounded-lg text-lg font-semibold transition-colors"
+            >
+              Menu Principal
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+);
 }
