@@ -68,6 +68,8 @@ const isWallBetweenWithSet = (start: Position, end: Position, wallsSet: Wall[]):
   return false;
 };
 
+
+//menor caminho
 const shortestPathLength = (player: Player, currentPlayers: { P1: Position; P2: Position }, currentWalls: Wall[]): number => {
   const goalRow = player === 'P1' ? BOARD_SIZE - 1 : 0;
   const start = currentPlayers[player];
@@ -515,6 +517,8 @@ export default function QuoridorGame() {
     setPendingMove(null);
   };
 
+
+  //qualidade de estado
   const evaluate = (state: GameState) => {
     if ((state.currentPlayer === 'P1' && state.players.P1.row === BOARD_SIZE - 1) ||
       (state.currentPlayer === 'P2' && state.players.P2.row === 0)) {
@@ -527,6 +531,8 @@ export default function QuoridorGame() {
     return distP1 - distP2;
   };
 
+
+  //gera estados possiveis
   const getNextStates = (state: GameState): GameState[] => {
     const next: GameState[] = [];
     const currentPlayerPlayer = state.currentPlayer;
@@ -573,6 +579,8 @@ export default function QuoridorGame() {
     return next;
   };
 
+
+  //movimentos possiveis
   const getValidMovesForPlayer = (currentPos: Position, allPlayers: { P1: Position; P2: Position }, wallsSet: Wall[]): Position[] => {
     const moves: Position[] = [];
     const directions = [
@@ -627,6 +635,7 @@ export default function QuoridorGame() {
     return moves;
   };
 
+  //minimax alpha beta
   const minimaxAlphaBeta = (
     state: GameState,
     depth: number,
@@ -667,6 +676,8 @@ export default function QuoridorGame() {
     return { value: bestVal, bestState: bestSt };
   };
 
+
+  //minimax antecipacao
   const minimaxLimitedAnticipation = (
     state: GameState,
     depth: number,
@@ -699,6 +710,7 @@ export default function QuoridorGame() {
     return { value: bestVal, bestState: bestSt };
   };
 
+  //jogada IA
   const aiPlay = useCallback(() => {
     if (mode !== 'PvAI' || currentPlayer !== 'P2' || gameOver || isAiThinking) return;
 
